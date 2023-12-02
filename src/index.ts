@@ -49,109 +49,107 @@ export async function summarizeOrg(flags: flags): Promise<OrgSummary> {
     };
     console.log('Base Summary:', baseSummary);
 
-    return baseSummary;
+    if (selectedDataPoints && selectedDataPoints.length > 0) {
+        console.log(`Processing selected components: ${selectedDataPoints.join(', ')}`);
+        try {
+            const queryResults = queryDataPoints(selectedDataPoints, orgSummaryDirectory, orgAlias);
+            baseSummary.Components = calculateComponentSummary(selectedDataPoints, queryResults, errors);
+            console.log('components processed successfully.');
+        } catch (error) {
+            console.error('Error processing selected components:', error.message);
+            errors.push({ componentSummaryError: error.message });
+        }
+    }
 
-    // if (selectedDataPoints && selectedDataPoints.length > 0) {
-    //     console.log(`Processing selected components: ${selectedDataPoints.join(', ')}`);
-    //     try {
-    //         const queryResults = queryDataPoints(selectedDataPoints, orgSummaryDirectory, orgAlias);
-    //         baseSummary.Components = calculateComponentSummary(selectedDataPoints, queryResults, errors);
-    //         console.log('components processed successfully.');
-    //     } catch (error) {
-    //         console.error('Error processing selected components:', error.message);
-    //         errors.push({ componentSummaryError: error.message });
-    //     }
-    // }
+    if (!noHealthCheck) {
+        try {
+            baseSummary.HealthCheck = getHealthCheckScore(orgSummaryDirectory, orgAlias);
+        } catch (error) {
+            errors.push({ getHealthCheckScoreError: error.message });
+        }
+    }
 
-    // if (!noHealthCheck) {
-    //     try {
-    //         baseSummary.HealthCheck = getHealthCheckScore(orgSummaryDirectory, orgAlias);
-    //     } catch (error) {
-    //         errors.push({ getHealthCheckScoreError: error.message });
-    //     }
-    // }
+    if (!noLimits) {
+        console.log('Checking Org limits...');
+        try {
+            const limits = await checkLimits(info.instanceUrl, info.accessToken);
+            const Applicable: number = limits ? limits.length : 0;
+            const Reached: number = limits ? limits.filter((limit) => limit.Remaining === 0).length : 0;
+            baseSummary.Limits = {
+                Applicable,
+                Reached,
+                'Unattained': (Applicable - Reached),
+                'Details': limits
+            };
+            console.log('Org limits checked.');
+        } catch (error) {
+            console.error('Error checking org limits:', error.message);
+            errors.push({ checkLimitsError: error.message });
+        }
+    }
 
-    // if (!noLimits) {
-    //     console.log('Checking Org limits...');
-    //     try {
-    //         const limits = await checkLimits(info.instanceUrl, info.accessToken);
-    //         const Applicable: number = limits ? limits.length : 0;
-    //         const Reached: number = limits ? limits.filter((limit) => limit.Remaining === 0).length : 0;
-    //         baseSummary.Limits = {
-    //             Applicable,
-    //             Reached,
-    //             'Unattained': (Applicable - Reached),
-    //             'Details': limits
-    //         };
-    //         console.log('Org limits checked.');
-    //     } catch (error) {
-    //         console.error('Error checking org limits:', error.message);
-    //         errors.push({ checkLimitsError: error.message });
-    //     }
-    // }
+    if (!noCodeAnalysis) {
+        try {
+            process.chdir(orgSummaryDirectory);
+            execSync('sfdx force:project:create -x -n tempSFDXProject');
+            process.chdir('./tempSFDXProject');
+            const retrieveCommand = orgAlias ? `sf project retrieve start --metadata ApexClass ApexTrigger AuraDefinitionBundle LightningComponentBundle StaticResource --target-org ${orgAlias}` :
+                'sf project retrieve start --metadata ApexClass ApexTrigger AuraDefinitionBundle LightningComponentBundle StaticResource';
+            execSync(retrieveCommand, { encoding: 'utf8' });
+            console.log('Running CLI scanner...');
+            execSync('sfdx scanner:run --target . --format csv --normalize-severity > CLIScannerResults.csv');
+            const results = preprocessResults();
+            const codeLines = calculateCodeLines();
+            baseSummary.Code = { 'Risks': results.length, 'RiskDetails': results, 'LinesOfCode': (codeLines.Apex.Total + codeLines.JavaScript.Total), 'RisksPerLineRatio': results.length / (codeLines.Apex.Total + codeLines.JavaScript.Total), 'LineDetails': codeLines };
+            process.chdir('../../../../');
+        } catch (error) {
+            console.error('Error running Code Analysis:', error.message);
+            errors.push({ calculateLinesOfCodeError: error.message });
+        }
+    }
 
-    // if (!noCodeAnalysis) {
-    //     try {
-    //         process.chdir(orgSummaryDirectory);
-    //         execSync('sfdx force:project:create -x -n tempSFDXProject');
-    //         process.chdir('./tempSFDXProject');
-    //         const retrieveCommand = orgAlias ? `sf project retrieve start --metadata ApexClass ApexTrigger AuraDefinitionBundle LightningComponentBundle StaticResource --target-org ${orgAlias}` :
-    //             'sf project retrieve start --metadata ApexClass ApexTrigger AuraDefinitionBundle LightningComponentBundle StaticResource';
-    //         execSync(retrieveCommand, { encoding: 'utf8' });
-    //         console.log('Running CLI scanner...');
-    //         execSync('sfdx scanner:run --target . --format csv --normalize-severity > CLIScannerResults.csv');
-    //         const results = preprocessResults();
-    //         const codeLines = calculateCodeLines();
-    //         baseSummary.Code = { 'Risks': results.length, 'RiskDetails': results, 'LinesOfCode': (codeLines.Apex.Total + codeLines.JavaScript.Total), 'RisksPerLineRatio': results.length / (codeLines.Apex.Total + codeLines.JavaScript.Total), 'LineDetails': codeLines };
-    //         process.chdir('../../../../');
-    //     } catch (error) {
-    //         console.error('Error running Code Analysis:', error.message);
-    //         errors.push({ calculateLinesOfCodeError: error.message });
-    //     }
-    // }
+    if (!noTests) {
+        console.log('Running Apex tests...');
+        try {
+            const testResultsCommand = `sfdx force:apex:test:run --target-org "${orgAlias}" --test-level RunLocalTests --code-coverage --result-format json > ${orgSummaryDirectory}/testResults.json`;
+            execSync(testResultsCommand, { encoding: 'utf8' });
+            const testRunId = extractTestRunId(`${orgSummaryDirectory}/testResults.json`);
+            if (testRunId) {
+                console.log(`Checking Status of Job "${testRunId}"...`);
+                await pollTestRunResult(testRunId, orgSummaryDirectory, orgAlias);
+                const testResult = await getTestRunDetails(testRunId, orgSummaryDirectory, orgAlias);
+                const orgWideApexCoverage = await getOrgWideApexCoverage(orgSummaryDirectory, orgAlias);
+                const orgWideFlowCoverage = await getFlowCoveragePercentage(orgAlias);
+                const flowCoverageDetails = await getFlowCoverageDetails(orgAlias) as FlowCoverage[];
+                baseSummary.Tests = {
+                    ApexUnitTests: testResult?.methodsCompleted ?? 0,
+                    TestDuration: testResult?.runtime.toString() ?? 'N/A',
+                    TestMethodsCompleted: testResult?.methodsCompleted ?? 0,
+                    TestMethodsFailed: testResult?.methodsFailed ?? 0,
+                    TestOutcome: testResult?.outcome ?? 'N/A',
+                    ApexTestCoverage: {
+                        'Total': orgWideApexCoverage ?? 0,
+                        'Details': await getApexClassCoverageDetails(orgSummaryDirectory, orgAlias),
+                    },
+                    FlowTestCoverage: {
+                        'Total': orgWideFlowCoverage ?? 0,
+                        'Details': flowCoverageDetails
+                    }
+                };
+                console.log('Apex tests completed successfully.');
+            }
+        } catch (error) {
+            console.error('Error running Apex tests:', error.message);
+            errors.push({ runApexTestsError: error.message });
+        }
+    }
 
-    // if (!noTests) {
-    //     console.log('Running Apex tests...');
-    //     try {
-    //         const testResultsCommand = `sfdx force:apex:test:run --target-org "${orgAlias}" --test-level RunLocalTests --code-coverage --result-format json > ${orgSummaryDirectory}/testResults.json`;
-    //         execSync(testResultsCommand, { encoding: 'utf8' });
-    //         const testRunId = extractTestRunId(`${orgSummaryDirectory}/testResults.json`);
-    //         if (testRunId) {
-    //             console.log(`Checking Status of Job "${testRunId}"...`);
-    //             await pollTestRunResult(testRunId, orgSummaryDirectory, orgAlias);
-    //             const testResult = await getTestRunDetails(testRunId, orgSummaryDirectory, orgAlias);
-    //             const orgWideApexCoverage = await getOrgWideApexCoverage(orgSummaryDirectory, orgAlias);
-    //             const orgWideFlowCoverage = await getFlowCoveragePercentage(orgAlias);
-    //             const flowCoverageDetails = await getFlowCoverageDetails(orgAlias) as FlowCoverage[];
-    //             baseSummary.Tests = {
-    //                 ApexUnitTests: testResult?.methodsCompleted ?? 0,
-    //                 TestDuration: testResult?.runtime.toString() ?? 'N/A',
-    //                 TestMethodsCompleted: testResult?.methodsCompleted ?? 0,
-    //                 TestMethodsFailed: testResult?.methodsFailed ?? 0,
-    //                 TestOutcome: testResult?.outcome ?? 'N/A',
-    //                 ApexTestCoverage: {
-    //                     'Total': orgWideApexCoverage ?? 0,
-    //                     'Details': await getApexClassCoverageDetails(orgSummaryDirectory, orgAlias),
-    //                 },
-    //                 FlowTestCoverage: {
-    //                     'Total': orgWideFlowCoverage ?? 0,
-    //                     'Details': flowCoverageDetails
-    //                 }
-    //             };
-    //             console.log('Apex tests completed successfully.');
-    //         }
-    //     } catch (error) {
-    //         console.error('Error running Apex tests:', error.message);
-    //         errors.push({ runApexTestsError: error.message });
-    //     }
-    // }
-
-    // baseSummary.ResultState = errors.length > 0 ? 'Failure' : 'Completed';
-    // const summary: OrgSummary = {
-    //     ...baseSummary
-    // };
-    // console.log('Final Summary:', summary);
-    // return summary;
+    baseSummary.ResultState = errors.length > 0 ? 'Failure' : 'Completed';
+    const summary: OrgSummary = {
+        ...baseSummary
+    };
+    console.log('Final Summary:', summary);
+    return summary;
 }
 
 async function checkLimits(instanceURL: string, accessToken: string): Promise<Limit[]> {
