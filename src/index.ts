@@ -8,6 +8,7 @@ import { dataPoints } from './data/DataPoints';
 import { CodeAnalysis, LimitSummary, TestSummary, TestCoverageApex, TestCoverageFlow } from './models/summary';
 
 export interface flags {
+    outputdirectory: string;
     components?: string;
     nohealthcheck?: boolean;
     nolimits?: boolean;
@@ -28,9 +29,17 @@ export async function summarizeOrg(flags: flags): Promise<OrgSummary> {
     const noTests = flags.notests ? flags.notests : false;
     const noCodeAnalysis = flags.nocodeanalysis ? flags.nocodeanalysis : false;
     const selectedDataPoints = flags.components ? flags.components.split(',') : dataPoints;
+    const outputDirectory = flags.outputdirectory;
+    let orgSummaryDirectory;
+    if (outputDirectory.endsWith('/orgsummary')) {
+        orgSummaryDirectory = outputDirectory + `/${info.orgId}/${timestamp}`;   
+    } else {
+        orgSummaryDirectory = outputDirectory + `orgsummary/${info.orgId}/${timestamp}`;
+    }
+    if (!fs.existsSync(orgSummaryDirectory)) {
+        fs.mkdirSync(orgSummaryDirectory, { recursive: true });
+    }    
     const errors: any[] = [];
-
-    const orgSummaryDirectory = `./orgsummary/${info.orgId}/${timestamp}`;
     let initialMessage;
     if (orgAlias) {
         initialMessage = `Running queries on the Org with the Alias "${orgAlias}"`;
