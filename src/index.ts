@@ -56,17 +56,8 @@ export async function summarizeOrg(flags: flags, orgSummary?: OrgSummary): Promi
         fs.mkdirSync(orgSummaryDirectory, { recursive: true });
     }    
     const errors: any[] = [];
-    let initialMessage;
-    if (orgAlias) {
-        initialMessage = `Running queries on the Org with the Alias "${orgAlias}"`;
-    } else {         
-        initialMessage = 'No Org Alias provided, queries will be running on the set default Org';
-    }
-    console.log(initialMessage);
-
-
     if (selectedDataPoints && selectedDataPoints.length > 0) {
-        console.log(`Processing selected components: ${selectedDataPoints.join(', ')}`);
+        console.log(`Processing components: ${selectedDataPoints.join(', ')}`);
         try {
             const queryResults = queryDataPoints(selectedDataPoints, orgSummaryDirectory, orgAlias);
             baseSummary.Components = calculateComponentSummary(selectedDataPoints, queryResults, errors);
