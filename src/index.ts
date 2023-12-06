@@ -13,30 +13,44 @@ export interface flags {
     outputdirectory?: string;
     components?: string;
     keepdata?: boolean;
-    nohealthcheck?: boolean;
-    nolimits?: boolean;
-    nocodeanalysis?: boolean;
-    notests?: boolean;
+    healthcheck?: boolean;
+    limits?: boolean;
+    codeanalysis?: boolean;
+    tests?: boolean;
     targetusername?: string;
 }
 
-export async function summarizeOrg(flags: flags): Promise<OrgSummary> {
-
-    const orgAlias = flags.targetusername ?? undefined;
+export async function buildBaseSummary(info: OrgInfo){
     const currentDate = new Date().toISOString().replace(/T/, ' ').replace(/\..+/, '');
     const timestamp = Date.now().toString();
+    
+    const baseSummary: OrgSummary = {
+        DateOfSummary: currentDate,
+        Timestamp: timestamp,
+        ResultState: 'Pending',
+        OrgId: info.orgId,
+        Username: info.username,
+        OrgInstanceURL: info.instanceUrl,
+    };
+    return baseSummary;
+}
+
+export async function summarizeOrg(flags: flags, orgSummary?: OrgSummary): Promise<OrgSummary> {
+
+    const orgAlias = flags.targetusername ?? undefined;
     const info = getOrgInfo(orgAlias);
-    const noHealthCheck = flags.nohealthcheck ? flags.nohealthcheck : false;
+    const baseSummary = orgSummary || (await buildBaseSummary(info));
     const keepData = flags.keepdata ? flags.keepdata : false;
-    const noLimits = flags.nolimits ? flags.nolimits : false;
-    const noTests = flags.notests ? flags.notests : false;
-    const noCodeAnalysis = flags.nocodeanalysis ? flags.nocodeanalysis : false;
+    const healthCheck = flags.healthcheck ? flags.healthcheck : true;
+    const limits = flags.limits ? flags.limits : true;
+    const tests = flags.tests ? flags.tests : true;
+    const codeAnalysis = flags.codeanalysis ? flags.codeanalysis : true;
     const selectedDataPoints = flags.components ? flags.components.split(',') : dataPoints;
     let orgSummaryDirectory;
     if(!flags.outputdirectory){
-        orgSummaryDirectory = __dirname + `/${info.orgId}/${timestamp}`; 
+        orgSummaryDirectory = __dirname + `/${info.orgId}/${baseSummary.Timestamp}`; 
     } else {
-        orgSummaryDirectory = (flags.outputdirectory) + `/${info.orgId}/${timestamp}`;
+        orgSummaryDirectory = (flags.outputdirectory) + `/${info.orgId}/${baseSummary.Timestamp}`;
     }
     if (!fs.existsSync(orgSummaryDirectory)) {
         fs.mkdirSync(orgSummaryDirectory, { recursive: true });
@@ -50,29 +64,18 @@ export async function summarizeOrg(flags: flags): Promise<OrgSummary> {
     }
     console.log(initialMessage);
 
-    const baseSummary: OrgSummary = {
-        DateOfSummary: currentDate,
-        Timestamp: timestamp,
-        ResultState: 'Pending',
-        OrgId: info.orgId,
-        Username: info.username,
-        OrgInstanceURL: info.instanceUrl,
-    };
-    console.log('Base Summary:', baseSummary);
 
     if (selectedDataPoints && selectedDataPoints.length > 0) {
         console.log(`Processing selected components: ${selectedDataPoints.join(', ')}`);
         try {
             const queryResults = queryDataPoints(selectedDataPoints, orgSummaryDirectory, orgAlias);
             baseSummary.Components = calculateComponentSummary(selectedDataPoints, queryResults, errors);
-            console.log('components processed successfully.');
         } catch (error) {
-            console.error('Error processing selected components:', error.message);
             errors.push({ componentSummaryError: error.message });
         }
     }
 
-    if (!noHealthCheck) {
+    if (healthCheck) {
         try {
             baseSummary.HealthCheck = getHealthCheckScore(orgSummaryDirectory, orgAlias);
         } catch (error) {
@@ -80,8 +83,7 @@ export async function summarizeOrg(flags: flags): Promise<OrgSummary> {
         }
     }
 
-    if (!noLimits) {
-        console.log('Checking Org limits...');
+    if (limits) {
         try {
             const limits = await checkLimits(info.instanceUrl, info.accessToken);
             const Applicable: number = limits ? limits.length : 0;
@@ -92,14 +94,12 @@ export async function summarizeOrg(flags: flags): Promise<OrgSummary> {
                 'Unattained': (Applicable - Reached),
                 'Details': limits
             };
-            console.log('Org limits checked.');
         } catch (error) {
-            console.error('Error checking org limits:', error.message);
             errors.push({ checkLimitsError: error.message });
         }
     }
 
-    if (!noCodeAnalysis) {
+    if (codeAnalysis) {
         try {
             process.chdir(orgSummaryDirectory);
             execSync('sfdx force:project:create -x -n tempSFDXProject');
@@ -107,26 +107,23 @@ export async function summarizeOrg(flags: flags): Promise<OrgSummary> {
             const retrieveCommand = orgAlias ? `sf project retrieve start --metadata ApexClass ApexTrigger AuraDefinitionBundle LightningComponentBundle StaticResource --target-org ${orgAlias}` :
                 'sf project retrieve start --metadata ApexClass ApexTrigger AuraDefinitionBundle LightningComponentBundle StaticResource';
             execSync(retrieveCommand, { encoding: 'utf8' });
-            console.log('Running CLI scanner...');
             execSync('sfdx scanner:run --target . --format csv --normalize-severity > CLIScannerResults.csv');
             const results = preprocessResults();
             const codeLines = calculateCodeLines();
             baseSummary.Code = { 'Risks': results.length, 'RiskDetails': results, 'LinesOfCode': (codeLines.Apex.Total + codeLines.JavaScript.Total), 'RisksPerLineRatio': results.length / (codeLines.Apex.Total + codeLines.JavaScript.Total), 'LineDetails': codeLines };
             process.chdir('../../../../');
         } catch (error) {
-            console.error('Error running Code Analysis:', error.message);
             errors.push({ calculateLinesOfCodeError: error.message });
         }
     }
 
-    if (!noTests) {
-        console.log('Running Apex tests...');
+    if (tests) {
         try {
             const testResultsCommand = `sfdx force:apex:test:run --target-org "${orgAlias}" --test-level RunLocalTests --code-coverage --result-format json > ${orgSummaryDirectory}/testResults.json`;
             execSync(testResultsCommand, { encoding: 'utf8' });
             const testRunId = extractTestRunId(`${orgSummaryDirectory}/testResults.json`);
             if (testRunId) {
-                console.log(`Checking Status of Job "${testRunId}"...`);
+                console.log(`Checking Status of Apex Test Job "${testRunId}"...`);
                 await pollTestRunResult(testRunId, orgSummaryDirectory, orgAlias);
                 const testResult = await getTestRunDetails(testRunId, orgSummaryDirectory, orgAlias);
                 const orgWideApexCoverage = await getOrgWideApexCoverage(orgSummaryDirectory, orgAlias);
@@ -147,10 +144,8 @@ export async function summarizeOrg(flags: flags): Promise<OrgSummary> {
                         'Details': flowCoverageDetails
                     }
                 };
-                console.log('Apex tests completed successfully.');
             }
         } catch (error) {
-            console.error('Error running Apex tests:', error.message);
             errors.push({ runApexTestsError: error.message });
         }
     }
@@ -170,7 +165,6 @@ export async function summarizeOrg(flags: flags): Promise<OrgSummary> {
 function finish(orgSummaryDirectory: string, summarizedOrg: OrgSummary, keepData: boolean, outputDirectory?: string) {
     if (!keepData) {
         const cleanUpDirectory = () => {
-            console.log('Cleaning up...');
             const files = fs.readdirSync(orgSummaryDirectory);
             for (const file of files) {
                 const filePath = `${orgSummaryDirectory}/${file}`;
@@ -735,6 +729,4 @@ export type OrgSummary = {
     HealthCheck: HealthCheckSummary;
     Limits: LimitSummary;
     Tests: TestSummary;
-    TestCoverageApex: TestCoverageApex;
-    TestCoverageFlow: TestCoverageFlow;
   }>;
