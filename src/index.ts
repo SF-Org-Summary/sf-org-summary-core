@@ -40,11 +40,12 @@ export async function summarizeOrg(flags: flags, orgSummary?: OrgSummary): Promi
     const orgAlias = flags.targetusername ?? undefined;
     const info = getOrgInfo(orgAlias);
     const baseSummary = orgSummary || (await buildBaseSummary(info));
+   
     const keepData = flags.keepdata ? flags.keepdata : false;
-    const healthCheck = flags.healthcheck ? flags.healthcheck : true;
-    const limits = flags.limits ? flags.limits : true;
-    const tests = flags.tests ? flags.tests : true;
-    const codeAnalysis = flags.codeanalysis ? flags.codeanalysis : true;
+    const healthCheck = flags.healthcheck;
+    const limits = flags.limits;
+    const tests = flags.tests;
+    const codeAnalysis = flags.codeanalysis;
     const selectedDataPoints = flags.components ? flags.components.split(',') : dataPoints;
     let orgSummaryDirectory;
     if(!flags.outputdirectory){
@@ -56,15 +57,6 @@ export async function summarizeOrg(flags: flags, orgSummary?: OrgSummary): Promi
         fs.mkdirSync(orgSummaryDirectory, { recursive: true });
     }    
     const errors: any[] = [];
-    if (selectedDataPoints && selectedDataPoints.length > 0) {
-        console.log(`Processing components: ${selectedDataPoints.join(', ')}`);
-        try {
-            const queryResults = queryDataPoints(selectedDataPoints, orgSummaryDirectory, orgAlias);
-            baseSummary.Components = calculateComponentSummary(selectedDataPoints, queryResults, errors);
-        } catch (error) {
-            errors.push({ componentSummaryError: error.message });
-        }
-    }
 
     if (healthCheck) {
         try {
@@ -141,6 +133,16 @@ export async function summarizeOrg(flags: flags, orgSummary?: OrgSummary): Promi
         }
     }
 
+    if (selectedDataPoints && selectedDataPoints.length > 0) {
+        console.log(`Processing components: ${selectedDataPoints.join(', ')}`);
+        try {
+            const queryResults = queryDataPoints(selectedDataPoints, orgSummaryDirectory, orgAlias);
+            baseSummary.Components = calculateComponentSummary(selectedDataPoints, queryResults, errors);
+        } catch (error) {
+            errors.push({ componentSummaryError: error.message });
+        }
+    }
+
     baseSummary.ResultState = errors.length > 0 ? 'Failure' : 'Completed';
     const summary: OrgSummary = {
         ...baseSummary
@@ -149,7 +151,6 @@ export async function summarizeOrg(flags: flags, orgSummary?: OrgSummary): Promi
     if(flags.outputdirectory){
         summary.OutputPath = flags.outputdirectory;
     }
-    console.log('Final Summary:', summary);
     return summary;
 }
 
@@ -327,7 +328,6 @@ function getHealthCheckScore(path: string, orgAlias?: string): HealthCheckSummar
         commandHCR = `sfdx data:query --query "SELECT OrgValue, RiskType, Setting, SettingGroup, SettingRiskCategory FROM SecurityHealthCheckRisks" --result-format csv --use-tooling-api > ${commandHCSPath}`;
     }
 
-    try {
         execSync(commandHCS, { encoding: 'utf8' });
         const hcsData = fs.readFileSync(commandHCSPath, 'utf8');
         const hcScore = parse(hcsData, { columns: true });
@@ -346,10 +346,6 @@ function getHealthCheckScore(path: string, orgAlias?: string): HealthCheckSummar
         }
         console.log('Health Check Score and Health Risks added sucessfully.');
         return healthCheckSummary;
-    } catch (error) {
-        console.error('Error adding Health Check Score and Health Risks:', error.message);
-    }
-    return healthCheckSummary;
 
 }
 

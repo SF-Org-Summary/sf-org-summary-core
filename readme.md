@@ -6,25 +6,10 @@ Salesforce Org Summarizer is a tool designed to provide a comprehensive summary 
 
 ## Table of Contents
 
-- [Installation](#installation)
 - [Usage](#usage)
 - [Flags](#flags)
 - [Examples](#examples)
 - [Output](#output)
-
-## Installation
-
-1. Clone this repository:
-
-```bash
-git clone <repository_url>
-cd <repository_directory>
-```
-
-2. Install dependencies:
-```bash
-npm install
-```
 
 ## Usage
 
@@ -49,4 +34,4 @@ summarizeOrg(orgAlias: string, baseSummary?: OrgSummary)
 
 ## Output:
 
-The tool generates a detailed summary that includes information about components, code analysis, health checks, limits, and tests. The summary is saved as a JSON file in the specified output directory.   
+The tool generates a detailed summary that includes information about components, code analysis, health checks, limits, and tests. The summary is saved as a JSON file in the specified output directory, or in case this is not provided, the current directory.   
