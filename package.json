@@ -1,6 +1,12 @@
 {
   "name": "sf-org-summary-core",
   "version": "1.0.0",
+  "license": "AGPL-3.0",
+  "publisher": "sf-org-summary",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/SF-Org-Summary/sf-org-summary-core"
+	},
   "description": "",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -10,8 +16,6 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
-  "author": "",
-  "license": "ISC",
   "devDependencies": {
     "@types/node": "^20.10.2",
     "fse": "^4.0.1",
