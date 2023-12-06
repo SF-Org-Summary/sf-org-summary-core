@@ -1,20 +1,22 @@
 import { execSync } from 'node:child_process';
 import fs = require('fs');
+import path from 'path';
 import axios from 'axios';
 import parse = require('csv-parse/lib/sync');
 import { ApexClassCoverage, CodeDetails, ComponentSummary, FlowCoverage, HealthCheckRisk, HealthCheckSummary, Limit, ProblemInfo } from './models/summary';
 import { countCodeLines } from './libs/CountCodeLines';
 import { dataPoints } from './data/DataPoints';
 import { CodeAnalysis, LimitSummary, TestSummary, TestCoverageApex, TestCoverageFlow } from './models/summary';
+import * as fse from 'fs-extra';
 
 export interface flags {
-    outputdirectory: string;
+    outputdirectory?: string;
     components?: string;
+    keepdata?: boolean;
     nohealthcheck?: boolean;
     nolimits?: boolean;
     nocodeanalysis?: boolean;
     notests?: boolean;
-    nocodelines?: boolean;
     targetusername?: string;
 }
 
@@ -25,16 +27,16 @@ export async function summarizeOrg(flags: flags): Promise<OrgSummary> {
     const timestamp = Date.now().toString();
     const info = getOrgInfo(orgAlias);
     const noHealthCheck = flags.nohealthcheck ? flags.nohealthcheck : false;
+    const keepData = flags.keepdata ? flags.keepdata : false;
     const noLimits = flags.nolimits ? flags.nolimits : false;
     const noTests = flags.notests ? flags.notests : false;
     const noCodeAnalysis = flags.nocodeanalysis ? flags.nocodeanalysis : false;
     const selectedDataPoints = flags.components ? flags.components.split(',') : dataPoints;
-    const outputDirectory = flags.outputdirectory;
     let orgSummaryDirectory;
-    if (outputDirectory.endsWith('/orgsummary')) {
-        orgSummaryDirectory = outputDirectory + `/${info.orgId}/${timestamp}`;   
+    if(!flags.outputdirectory){
+        orgSummaryDirectory = __dirname + `/${info.orgId}/${timestamp}`; 
     } else {
-        orgSummaryDirectory = outputDirectory + `orgsummary/${info.orgId}/${timestamp}`;
+        orgSummaryDirectory = (flags.outputdirectory) + `/${info.orgId}/${timestamp}`;
     }
     if (!fs.existsSync(orgSummaryDirectory)) {
         fs.mkdirSync(orgSummaryDirectory, { recursive: true });
@@ -43,7 +45,7 @@ export async function summarizeOrg(flags: flags): Promise<OrgSummary> {
     let initialMessage;
     if (orgAlias) {
         initialMessage = `Running queries on the Org with the Alias "${orgAlias}"`;
-    } else {
+    } else {         
         initialMessage = 'No Org Alias provided, queries will be running on the set default Org';
     }
     console.log(initialMessage);
@@ -157,8 +159,38 @@ export async function summarizeOrg(flags: flags): Promise<OrgSummary> {
     const summary: OrgSummary = {
         ...baseSummary
     };
+    finish(orgSummaryDirectory, summary, keepData, flags.outputdirectory);
+    if(flags.outputdirectory){
+        summary.OutputPath = flags.outputdirectory;
+    }
     console.log('Final Summary:', summary);
     return summary;
+}
+
+function finish(orgSummaryDirectory: string, summarizedOrg: OrgSummary, keepData: boolean, outputDirectory?: string) {
+    if (!keepData) {
+        const cleanUpDirectory = () => {
+            console.log('Cleaning up...');
+            const files = fs.readdirSync(orgSummaryDirectory);
+            for (const file of files) {
+                const filePath = `${orgSummaryDirectory}/${file}`;
+                if (fs.statSync(filePath).isFile()) {
+                    fs.unlinkSync(filePath);
+                } else {
+                    fse.removeSync(filePath);
+                }
+            }
+        };
+        cleanUpDirectory();
+    }
+    const saveSummaryAsJson = (summaryData: OrgSummary) => {
+        const jsonFilePath = `${orgSummaryDirectory}/orgsummary.json`;
+        fs.writeFileSync(jsonFilePath, JSON.stringify(summaryData, null, 2), 'utf8');
+        console.log(`Summary saved as: ${jsonFilePath}`);
+    };
+    if(outputDirectory){
+        saveSummaryAsJson(summarizedOrg);
+    }
 }
 
 async function checkLimits(instanceURL: string, accessToken: string): Promise<Limit[]> {
@@ -415,8 +447,8 @@ async function pollTestRunResult(jobId: string, path: string, orgAlias?: string)
 function queryDataPoints(selectedDataPoints: string[], orgSummaryDirectory: string, orgAlias?: string | undefined) {
     const queryResults: { [key: string]: QueryResult[] } = {};
     for (const dataPoint of selectedDataPoints) {
-        const query = buildQuery(dataPoint);
-        const result = queryMetadata(query, (orgSummaryDirectory + '/' + dataPoint + '.csv'), orgAlias);
+        const query = buildQuery(dataPoint.trim());
+        const result = queryMetadata(query, (orgSummaryDirectory + '/' + dataPoint.trim() + '.csv'), orgAlias);
         queryResults[dataPoint] = result instanceof Array ? result : [];
     }
     return queryResults
@@ -697,6 +729,7 @@ export type OrgSummary = {
     OrgInstanceURL: string;
     Username: string;
   } & Partial<{
+    OutputPath: string;
     Components: { [key: string]: ComponentSummary };
     Code: CodeAnalysis;
     HealthCheck: HealthCheckSummary;
