@@ -11,7 +11,7 @@ import * as fse from 'fs-extra';
 
 export interface flags {
     outputdirectory?: string;
-    components?: string;
+    metadata?: string;
     keepdata?: boolean;
     healthcheck?: boolean;
     limits?: boolean;
@@ -46,7 +46,7 @@ export async function summarizeOrg(flags: flags, orgSummary?: OrgSummary): Promi
     const limits = flags.limits;
     const tests = flags.tests;
     const codeAnalysis = flags.codeanalysis;
-    const selectedDataPoints = flags.components ? flags.components.split(',') : dataPoints;
+    const selectedDataPoints = flags.metadata ? flags.metadata.split(',') : dataPoints;
     let orgSummaryDirectory;
     if(!flags.outputdirectory){
         orgSummaryDirectory = __dirname + `/${info.orgId}/${baseSummary.Timestamp}`; 
@@ -137,7 +137,7 @@ export async function summarizeOrg(flags: flags, orgSummary?: OrgSummary): Promi
         console.log(`Processing components: ${selectedDataPoints.join(', ')}`);
         try {
             const queryResults = queryDataPoints(selectedDataPoints, orgSummaryDirectory, orgAlias);
-            baseSummary.Components = calculateComponentSummary(selectedDataPoints, queryResults, errors);
+            baseSummary.Metadata = calculateComponentSummary(selectedDataPoints, queryResults, errors);
         } catch (error) {
             errors.push({ componentSummaryError: error.message });
         }
@@ -711,7 +711,7 @@ export type OrgSummary = {
     Username: string;
   } & Partial<{
     OutputPath: string;
-    Components: { [key: string]: ComponentSummary };
+    Metadata: { [key: string]: ComponentSummary };
     Code: CodeAnalysis;
     HealthCheck: HealthCheckSummary;
     Limits: LimitSummary;
