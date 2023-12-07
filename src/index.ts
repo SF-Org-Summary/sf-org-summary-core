@@ -17,36 +17,42 @@ export interface flags {
     limits?: boolean;
     codeanalysis?: boolean;
     tests?: boolean;
-    targetusername?: string;
+    targetusername: string;
 }
 
-export async function buildBaseSummary(info: OrgInfo){
+export async function buildBaseSummary(orgAlias: string, info?: OrgInfo): Promise<OrgSummary> {
     const currentDate = new Date().toISOString().replace(/T/, ' ').replace(/\..+/, '');
     const timestamp = Date.now().toString();
+
+    // If orgInfo is not provided, use getOrgInfo to fetch it
+    if (!info) {
+        info = getOrgInfo(orgAlias);
+    }
     
     const baseSummary: OrgSummary = {
         DateOfSummary: currentDate,
         Timestamp: timestamp,
         ResultState: 'Pending',
-        OrgId: info.orgId,
-        Username: info.username,
-        OrgInstanceURL: info.instanceUrl,
+        OrgId: (info && info.orgId) || '',
+        Username: (info && info.username) || '',
+        OrgInstanceURL: (info && info.instanceUrl) || '',
     };
     return baseSummary;
 }
 
 export async function summarizeOrg(flags: flags, orgSummary?: OrgSummary): Promise<OrgSummary> {
-
-    const orgAlias = flags.targetusername ?? undefined;
+    
+    const orgAlias = flags.targetusername || '';
     const info = getOrgInfo(orgAlias);
-    const baseSummary = orgSummary || (await buildBaseSummary(info));
-   
-    const keepData = flags.keepdata ? flags.keepdata : false;
-    const healthCheck = flags.healthcheck;
-    const limits = flags.limits;
-    const tests = flags.tests;
-    const codeAnalysis = flags.codeanalysis;
-    const selectedDataPoints = flags.metadata ? flags.metadata.split(',') : dataPoints;
+    const baseSummary = orgSummary || (await buildBaseSummary(orgAlias, info));
+
+    console.debug(flags);
+    let selectedDataPoints;
+    if(flags.metadata === ""){
+        selectedDataPoints = undefined;
+    } else {
+        selectedDataPoints = flags.metadata ? flags.metadata.split(',') : dataPoints;
+    }
     let orgSummaryDirectory;
     if(!flags.outputdirectory){
         orgSummaryDirectory = __dirname + `/${info.orgId}/${baseSummary.Timestamp}`; 
@@ -58,7 +64,7 @@ export async function summarizeOrg(flags: flags, orgSummary?: OrgSummary): Promi
     }    
     const errors: any[] = [];
 
-    if (healthCheck) {
+    if (flags.healthcheck) {
         try {
             baseSummary.HealthCheck = getHealthCheckScore(orgSummaryDirectory, orgAlias);
         } catch (error) {
@@ -66,7 +72,7 @@ export async function summarizeOrg(flags: flags, orgSummary?: OrgSummary): Promi
         }
     }
 
-    if (limits) {
+    if (flags.limits) {
         try {
             const limits = await checkLimits(info.instanceUrl, info.accessToken);
             const Applicable: number = limits ? limits.length : 0;
@@ -82,7 +88,7 @@ export async function summarizeOrg(flags: flags, orgSummary?: OrgSummary): Promi
         }
     }
 
-    if (codeAnalysis) {
+    if (flags.codeanalysis) {
         try {
             process.chdir(orgSummaryDirectory);
             execSync('sfdx force:project:create -x -n tempSFDXProject');
@@ -100,7 +106,7 @@ export async function summarizeOrg(flags: flags, orgSummary?: OrgSummary): Promi
         }
     }
 
-    if (tests) {
+    if (flags.tests) {
         try {
             const testResultsCommand = `sfdx force:apex:test:run --target-org "${orgAlias}" --test-level RunLocalTests --code-coverage --result-format json > ${orgSummaryDirectory}/testResults.json`;
             execSync(testResultsCommand, { encoding: 'utf8' });
@@ -147,7 +153,7 @@ export async function summarizeOrg(flags: flags, orgSummary?: OrgSummary): Promi
     const summary: OrgSummary = {
         ...baseSummary
     };
-    finish(orgSummaryDirectory, summary, keepData, flags.outputdirectory);
+    finish(orgSummaryDirectory, summary, flags.keepdata, flags.outputdirectory);
     if(flags.outputdirectory){
         summary.OutputPath = flags.outputdirectory;
     }
@@ -505,7 +511,6 @@ function calculateCodeLines(): CodeDetails {
         },
     };
 }
-
 
 interface QueryResult {
     attributes: {
