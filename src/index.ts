@@ -6,7 +6,7 @@ import parse = require('csv-parse/lib/sync');
 import { ApexClassCoverage, CodeDetails, ComponentSummary, FlowCoverage, HealthCheckRisk, HealthCheckSummary, Limit, ProblemInfo } from './models/summary';
 import { countCodeLines } from './libs/CountCodeLines';
 import { dataPoints } from './data/DataPoints';
-import { CodeAnalysis, LimitSummary, TestSummary, TestCoverageApex, TestCoverageFlow } from './models/summary';
+import { CodeAnalysis, LimitSummary, TestSummary } from './models/summary';
 import * as fse from 'fs-extra';
 
 export interface flags {
@@ -45,8 +45,6 @@ export async function summarizeOrg(flags: flags, orgSummary?: OrgSummary): Promi
     const orgAlias = flags.targetusername || '';
     const info = getOrgInfo(orgAlias);
     const baseSummary = orgSummary || (await buildBaseSummary(orgAlias, info));
-
-    console.debug(flags);
     let selectedDataPoints;
     if(flags.metadata === ""){
         selectedDataPoints = undefined;
@@ -272,7 +270,6 @@ async function getFlowCoveragePercentage(orgAlias?: string): Promise<number> {
     }
 }
 
-// Function to get details for each Apex class coverage
 async function getApexClassCoverageDetails(path: string, orgAlias?: string): Promise<ApexClassCoverage[]> {
     try {
         const query = 'SELECT ApexClassOrTrigger.Name, NumLinesCovered, NumLinesUncovered FROM ApexCodeCoverageAggregate';
