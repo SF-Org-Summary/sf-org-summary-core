@@ -3,10 +3,10 @@
   "version": "1.0.0",
   "license": "AGPL-3.0",
   "publisher": "sf-org-summary",
-	"repository": {
-		"type": "git",
-		"url": "https://github.com/SF-Org-Summary/sf-org-summary-core"
-	},
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SF-Org-Summary/sf-org-summary-core"
+  },
   "description": "",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "axios": "^1.6.2",
+    "jsforce": "^1.11.1",
     "path": "^0.12.7"
   }
 }

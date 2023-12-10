@@ -1,5 +1,6 @@
 import { execSync } from 'node:child_process';
 import fs = require('fs');
+import * as jsforce from 'jsforce';
 import path from 'path';
 import axios from 'axios';
 import parse = require('csv-parse/lib/sync');
@@ -156,6 +157,48 @@ export async function summarizeOrg(flags: flags, orgSummary?: OrgSummary): Promi
         summary.OutputPath = flags.outputdirectory;
     }
     return summary;
+}
+
+export async function uploadSummary(orgAlias: string, orgSummary: OrgSummary | string): Promise<any> {
+    const conn = new jsforce.Connection();
+        try {
+            // Set the access token directly
+            const info = getOrgInfo(orgAlias);
+
+            conn.accessToken = info.accessToken;
+    
+            // If orgSummary is a string, assume it's a file path and read the JSON from the file
+            if (typeof orgSummary === 'string') {
+                const summaryFilePath = orgSummary;
+                const summaryFileContent = fs.readFileSync(summaryFilePath, 'utf8');
+                orgSummary = JSON.parse(summaryFileContent) as OrgSummary;
+            }
+    
+            if (!orgSummary || !orgSummary.OrgId) {
+                throw new Error('Invalid or missing OrgSummary provided.');
+            }
+    
+            // Create OrgSummary__c record
+            const orgSummaryRecord = {
+                OrgId__c: orgSummary.OrgId,
+                OrgInstanceURL__c: orgSummary.OrgInstanceURL,
+                Timestamp__c: orgSummary.Timestamp,
+                Username__c: orgSummary.Username,
+                // Add other fields based on your requirements
+            };
+    
+            // Insert OrgSummary__c record
+            const result = await conn.sobject('OrgSummary__c').create(orgSummaryRecord);
+    
+            console.log('OrgSummary__c record created:', result);
+    
+            // You can add similar logic to create related records for Metadata, Code, HealthCheck, Limits, Tests, etc.
+    
+            return result;
+        } catch (error) {
+            console.error('Error uploading summary to Salesforce:', error);
+            throw error;
+        }
 }
 
 function finish(orgSummaryDirectory: string, summarizedOrg: OrgSummary, keepData: boolean, outputDirectory?: string) {
