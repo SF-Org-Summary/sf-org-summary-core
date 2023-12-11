@@ -189,7 +189,7 @@ export async function uploadSummary(orgAlias: string, orgSummary: OrgSummary | s
             
             if(orgSummary.HealthCheck){
                 const healthCheckRecord = {
-                    OrgSummary__c: result.Id,
+                    OrgSummary__c: result.id,
                     Score__c: orgSummary.HealthCheck.Score,
                     Criteria__c: orgSummary.HealthCheck.Criteria,
                     Risks__c: orgSummary.HealthCheck.Risks,
