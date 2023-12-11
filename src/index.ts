@@ -24,8 +24,6 @@ export interface flags {
 export async function buildBaseSummary(orgAlias: string, info?: OrgInfo): Promise<OrgSummary> {
     const currentDate = new Date().toISOString();
     const timestamp = Date.now().toString();
-
-    // If orgInfo is not provided, use getOrgInfo to fetch it
     if (!info) {
         info = getOrgInfo(orgAlias);
     }
@@ -118,15 +116,15 @@ export async function summarizeOrg(flags: flags, orgSummary?: OrgSummary): Promi
                 const flowCoverageDetails = await getFlowCoverageDetails(orgAlias) as FlowCoverage[];
                 baseSummary.Tests = {
                     ApexUnitTests: testResult?.methodsCompleted ?? 0,
-                    TestDuration: testResult?.runtime.toString() ?? 'N/A',
+                    TestDuration: testResult?.runtime ?? 0,
                     TestMethodsCompleted: testResult?.methodsCompleted ?? 0,
                     TestMethodsFailed: testResult?.methodsFailed ?? 0,
                     TestOutcome: testResult?.outcome ?? 'N/A',
-                    ApexTestCoverage: {
+                    ApexCoverageDetails: {
                         'Total': orgWideApexCoverage ?? 0,
                         'Details': await getApexClassCoverageDetails(orgSummaryDirectory, orgAlias),
                     },
-                    FlowTestCoverage: {
+                    FlowCoverageDetails: {
                         'Total': orgWideFlowCoverage ?? 0,
                         'Details': flowCoverageDetails
                     }
@@ -197,6 +195,39 @@ export async function uploadSummary(orgAlias: string, orgSummary: OrgSummary | s
                 const hcResult = await conn.sobject('HealthCheckSummary__c').create(healthCheckRecord);
                 console.log('HealthCheckSummary__c record created:', result);
             }
+            if(orgSummary.Code){
+                const codeSummaryRecord = {
+                    OrgSummary__c: result.id,
+                    LinesOfCode__c: orgSummary.Code.LinesOfCode,
+                    Risks__c: orgSummary.Code.Risks,
+                    RisksPerLineRatio__c: orgSummary.Code.RisksPerLineRatio
+                };
+                const cResult = await conn.sobject('CodeSummary__c').create(codeSummaryRecord);
+                console.log('CodeSummary__c record created:', result);
+            }
+            if(orgSummary.Tests){
+                const testSummaryRecord = {
+                    OrgSummary__c: result.id,
+                    ApexUnitTests__c: orgSummary.Tests.ApexUnitTests,
+                    TestDuration__c: orgSummary.Tests.TestDuration,
+                    TestMethodsCompleted__c: orgSummary.Tests.TestMethodsCompleted,
+                    TestMethodsFailed__c: orgSummary.Tests.TestMethodsFailed,
+                };
+                const testResult = await conn.sobject('TestsSummary__c').create(testSummaryRecord);
+                console.log('CodeSummary__c record created:', result);
+            }
+
+            if(orgSummary.Limits){
+                const limitSummaryRecord = {
+                    OrgSummary__c: result.id,
+                    Applicable__c: orgSummary.Limits.Applicable,
+                    Reached__c: orgSummary.Limits.Reached,
+                    Unattained__c: orgSummary.Limits.Unattained
+                };
+                const testResult = await conn.sobject('LimitsSummary__c').create(limitSummaryRecord);
+                console.log('LimitsSummary__c record created:', result);
+            }
+
 
             return result;
         } catch (error) {
@@ -492,7 +523,7 @@ async function getTestRunDetails(jobId: string, path: string, orgAlias?: string)
         if (results.length > 0) {
             const testRunResult = results[0];
             const outcome = testRunResult.Status === 'Completed' && testRunResult.MethodsFailed === 0 ? 'Pass' : 'Fail';
-            const runtime = testRunResult.TestTime;
+            const runtime = testRunResult.TestTime as number;
             const methodsCompleted = testRunResult.MethodsCompleted;
             const methodsFailed = testRunResult.MethodsFailed;
             console.log(`Test Run Outcome: ${outcome}, Runtime: ${runtime}s`);
