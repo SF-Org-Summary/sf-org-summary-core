@@ -31,7 +31,6 @@ export async function buildBaseSummary(orgAlias: string, info?: OrgInfo): Promis
     }
     
     const baseSummary: OrgSummary = {
-        DateOfSummary: currentDate,
         Timestamp: timestamp,
         ResultState: 'Pending',
         OrgId: (info && info.orgId) || '',
@@ -753,7 +752,6 @@ export interface FlowDefinitionViewResult {
 }
 
 export type OrgSummary = {
-    DateOfSummary: string;
     Timestamp: string;
     ResultState: string;
     OrgId: string;
