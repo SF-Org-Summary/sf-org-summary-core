@@ -22,7 +22,7 @@ export interface flags {
 }
 
 export async function buildBaseSummary(orgAlias: string, info?: OrgInfo): Promise<OrgSummary> {
-    const currentDate = new Date().toISOString().replace(/T/, ' ').replace(/\..+/, '');
+    const currentDate = new Date().toISOString();
     const timestamp = Date.now().toString();
 
     // If orgInfo is not provided, use getOrgInfo to fetch it
@@ -162,38 +162,43 @@ export async function summarizeOrg(flags: flags, orgSummary?: OrgSummary): Promi
 export async function uploadSummary(orgAlias: string, orgSummary: OrgSummary | string): Promise<any> {
     const conn = new jsforce.Connection();
         try {
-            // Set the access token directly
             const info = getOrgInfo(orgAlias);
-
+            conn.instanceUrl = info.instanceUrl;
             conn.accessToken = info.accessToken;
-    
-            // If orgSummary is a string, assume it's a file path and read the JSON from the file
             if (typeof orgSummary === 'string') {
                 const summaryFilePath = orgSummary;
                 const summaryFileContent = fs.readFileSync(summaryFilePath, 'utf8');
                 orgSummary = JSON.parse(summaryFileContent) as OrgSummary;
             }
-    
             if (!orgSummary || !orgSummary.OrgId) {
                 throw new Error('Invalid or missing OrgSummary provided.');
             }
-    
-            // Create OrgSummary__c record
+            const timestampInMilliseconds = parseInt(orgSummary.Timestamp, 10);
+            const dateOfSummary = new Date(timestampInMilliseconds);
+            const formattedDateOfSummary = dateOfSummary.toISOString();
             const orgSummaryRecord = {
+                Id__c: orgSummary.OrgId+'-'+orgSummary.Timestamp,
                 OrgId__c: orgSummary.OrgId,
                 OrgInstanceURL__c: orgSummary.OrgInstanceURL,
                 Timestamp__c: orgSummary.Timestamp,
                 Username__c: orgSummary.Username,
-                // Add other fields based on your requirements
+                DateOfSummary__c: formattedDateOfSummary,
             };
-    
-            // Insert OrgSummary__c record
             const result = await conn.sobject('OrgSummary__c').create(orgSummaryRecord);
-    
             console.log('OrgSummary__c record created:', result);
-    
-            // You can add similar logic to create related records for Metadata, Code, HealthCheck, Limits, Tests, etc.
-    
+            
+            if(orgSummary.HealthCheck){
+                const healthCheckRecord = {
+                    OrgSummary__c: result.Id,
+                    Score__c: orgSummary.HealthCheck.Score,
+                    Criteria__c: orgSummary.HealthCheck.Criteria,
+                    Risks__c: orgSummary.HealthCheck.Risks,
+                    Compliant__c: orgSummary.HealthCheck.Compliant,
+                };
+                const hcResult = await conn.sobject('HealthCheckSummary__c').create(healthCheckRecord);
+                console.log('HealthCheckSummary__c record created:', result);
+            }
+
             return result;
         } catch (error) {
             console.error('Error uploading summary to Salesforce:', error);
