@@ -1,5 +1,6 @@
 import { execSync } from 'node:child_process';
 import fs = require('fs');
+import * as jsforce from 'jsforce';
 import path from 'path';
 import axios from 'axios';
 import parse = require('csv-parse/lib/sync');
@@ -21,16 +22,13 @@ export interface flags {
 }
 
 export async function buildBaseSummary(orgAlias: string, info?: OrgInfo): Promise<OrgSummary> {
-    const currentDate = new Date().toISOString().replace(/T/, ' ').replace(/\..+/, '');
+    const currentDate = new Date().toISOString();
     const timestamp = Date.now().toString();
-
-    // If orgInfo is not provided, use getOrgInfo to fetch it
     if (!info) {
         info = getOrgInfo(orgAlias);
     }
     
     const baseSummary: OrgSummary = {
-        DateOfSummary: currentDate,
         Timestamp: timestamp,
         ResultState: 'Pending',
         OrgId: (info && info.orgId) || '',
@@ -118,15 +116,15 @@ export async function summarizeOrg(flags: flags, orgSummary?: OrgSummary): Promi
                 const flowCoverageDetails = await getFlowCoverageDetails(orgAlias) as FlowCoverage[];
                 baseSummary.Tests = {
                     ApexUnitTests: testResult?.methodsCompleted ?? 0,
-                    TestDuration: testResult?.runtime.toString() ?? 'N/A',
+                    TestDuration: testResult?.runtime ?? 0,
                     TestMethodsCompleted: testResult?.methodsCompleted ?? 0,
                     TestMethodsFailed: testResult?.methodsFailed ?? 0,
                     TestOutcome: testResult?.outcome ?? 'N/A',
-                    ApexTestCoverage: {
+                    ApexCoverageDetails: {
                         'Total': orgWideApexCoverage ?? 0,
                         'Details': await getApexClassCoverageDetails(orgSummaryDirectory, orgAlias),
                     },
-                    FlowTestCoverage: {
+                    FlowCoverageDetails: {
                         'Total': orgWideFlowCoverage ?? 0,
                         'Details': flowCoverageDetails
                     }
@@ -156,6 +154,104 @@ export async function summarizeOrg(flags: flags, orgSummary?: OrgSummary): Promi
         summary.OutputPath = flags.outputdirectory;
     }
     return summary;
+}
+
+export async function uploadSummary(orgAlias: string, orgSummary: OrgSummary | string): Promise<any> {
+    const conn = new jsforce.Connection();
+        try {
+            const info = getOrgInfo(orgAlias);
+            conn.instanceUrl = info.instanceUrl;
+            conn.accessToken = info.accessToken;
+            if (typeof orgSummary === 'string') {
+                const summaryFilePath = orgSummary;
+                const summaryFileContent = fs.readFileSync(summaryFilePath, 'utf8');
+                orgSummary = JSON.parse(summaryFileContent) as OrgSummary;
+            }
+            if (!orgSummary || !orgSummary.OrgId) {
+                throw new Error('Invalid or missing OrgSummary provided.');
+            }
+            const timestampInMilliseconds = parseInt(orgSummary.Timestamp, 10);
+            const dateOfSummary = new Date(timestampInMilliseconds);
+            const formattedDateOfSummary = dateOfSummary.toISOString();
+            const orgSummaryRecord = {
+                Id__c: orgSummary.OrgId+'-'+orgSummary.Timestamp,
+                OrgId__c: orgSummary.OrgId,
+                OrgInstanceURL__c: orgSummary.OrgInstanceURL,
+                Timestamp__c: orgSummary.Timestamp,
+                Username__c: orgSummary.Username,
+                DateOfSummary__c: formattedDateOfSummary,
+            };
+            const result = await conn.sobject('OrgSummary__c').create(orgSummaryRecord);
+            console.log('OrgSummary__c record created:', result);
+            
+            if(orgSummary.HealthCheck){
+                const healthCheckRecord = {
+                    OrgSummary__c: result.id,
+                    Score__c: orgSummary.HealthCheck.Score,
+                    Criteria__c: orgSummary.HealthCheck.Criteria,
+                    Risks__c: orgSummary.HealthCheck.Risks,
+                    Compliant__c: orgSummary.HealthCheck.Compliant,
+                };
+                const hcResult = await conn.sobject('HealthCheckSummary__c').create(healthCheckRecord);
+                console.log('HealthCheckSummary__c record created:', result);
+            }
+            if(orgSummary.Code){
+                const codeSummaryRecord = {
+                    OrgSummary__c: result.id,
+                    LinesOfCode__c: orgSummary.Code.LinesOfCode,
+                    Risks__c: orgSummary.Code.Risks,
+                    RisksPerLineRatio__c: orgSummary.Code.RisksPerLineRatio
+                };
+                const cResult = await conn.sobject('CodeSummary__c').create(codeSummaryRecord);
+                console.log('CodeSummary__c record created:', result);
+            }
+            if(orgSummary.Tests){
+                const testSummaryRecord = {
+                    OrgSummary__c: result.id,
+                    ApexUnitTests__c: orgSummary.Tests.ApexUnitTests,
+                    TestDuration__c: orgSummary.Tests.TestDuration,
+                    TestMethodsCompleted__c: orgSummary.Tests.TestMethodsCompleted,
+                    TestMethodsFailed__c: orgSummary.Tests.TestMethodsFailed,
+                };
+                const testResult = await conn.sobject('TestsSummary__c').create(testSummaryRecord);
+                console.log('CodeSummary__c record created:', result);
+            }
+
+            if(orgSummary.Limits){
+                const limitSummaryRecord = {
+                    OrgSummary__c: result.id,
+                    Applicable__c: orgSummary.Limits.Applicable,
+                    Reached__c: orgSummary.Limits.Reached,
+                    Unattained__c: orgSummary.Limits.Unattained
+                };
+                const testResult = await conn.sobject('LimitsSummary__c').create(limitSummaryRecord);
+                console.log('LimitsSummary__c record created:', result);
+            }
+            if (orgSummary.Metadata) {
+                const metadataSummaryRecord = {
+                    OrgSummary__c: result.id,
+                };
+                const metadataSummaryResult = await conn.sobject('MetadataSummary__c').create(metadataSummaryRecord);
+                console.log('MetadataSummary__c record created:', metadataSummaryResult);
+                const metadataTypes = Object.keys(orgSummary.Metadata);
+                for (const metadataType of metadataTypes) {
+                    const metadataTypeDetails = orgSummary.Metadata[metadataType];
+                    const metadataComponentRecord = {
+                        Name: metadataType,
+                        Metadata__c: metadataSummaryResult.id,
+                        Total__c: metadataTypeDetails.Total,
+                        Last_Modified__c: new Date(metadataTypeDetails.LastModifiedDate),
+                    };
+                    const metadataComponentResult = await conn.sobject('Metadata_Component__c').create(metadataComponentRecord);
+                    console.log('Metadata_Component__c record created:', metadataComponentResult);
+                }
+            }
+
+            return result;
+        } catch (error) {
+            console.error('Error uploading summary to Salesforce:', error);
+            throw error;
+        }
 }
 
 function finish(orgSummaryDirectory: string, summarizedOrg: OrgSummary, keepData: boolean, outputDirectory?: string) {
@@ -445,7 +541,7 @@ async function getTestRunDetails(jobId: string, path: string, orgAlias?: string)
         if (results.length > 0) {
             const testRunResult = results[0];
             const outcome = testRunResult.Status === 'Completed' && testRunResult.MethodsFailed === 0 ? 'Pass' : 'Fail';
-            const runtime = testRunResult.TestTime;
+            const runtime = testRunResult.TestTime as number;
             const methodsCompleted = testRunResult.MethodsCompleted;
             const methodsFailed = testRunResult.MethodsFailed;
             console.log(`Test Run Outcome: ${outcome}, Runtime: ${runtime}s`);
@@ -705,7 +801,6 @@ export interface FlowDefinitionViewResult {
 }
 
 export type OrgSummary = {
-    DateOfSummary: string;
     Timestamp: string;
     ResultState: string;
     OrgId: string;

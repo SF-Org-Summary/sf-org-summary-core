@@ -1,16 +1,16 @@
   export interface TestSummary {
     ApexUnitTests: number;
-    TestDuration: string;
+    TestDuration: number;
     TestMethodsCompleted: number;
     TestMethodsFailed: number;
     TestOutcome: string;
-    ApexTestCoverage: TestCoverageApex;
-    FlowTestCoverage: TestCoverageFlow;
+    ApexCoverageDetails: TestCoverageApex;
+    FlowCoverageDetails: TestCoverageFlow;
   }
   
   export interface CodeAnalysis {
     LinesOfCode: number;
-    Risks: number | 'N/A';
+    Risks: number;
     RisksPerLineRatio: number;
     LineDetails: CodeDetails;
     RiskDetails: ProblemInfo[];
