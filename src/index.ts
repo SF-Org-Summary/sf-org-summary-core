@@ -236,18 +236,16 @@ export async function uploadSummary(orgAlias: string, orgSummary: OrgSummary | s
                 const metadataTypes = Object.keys(orgSummary.Metadata);
                 for (const metadataType of metadataTypes) {
                     const metadataTypeDetails = orgSummary.Metadata[metadataType];
-    
                     const metadataComponentRecord = {
-                        MetadataSummary__c: metadataSummaryResult.id,
-                        Name__c: metadataType,
+                        Name: metadataType,
+                        Metadata__c: metadataSummaryResult.id,
                         Total__c: metadataTypeDetails.Total,
-                        LastModified__c: new Date(metadataTypeDetails.LastModifiedDate),
+                        Last_Modified__c: new Date(metadataTypeDetails.LastModifiedDate),
                     };
-                    const metadataComponentResult = await conn.sobject('MetadataComponent__c').create(metadataComponentRecord);
-                    console.log('MetadataComponent__c record created:', metadataComponentResult);
+                    const metadataComponentResult = await conn.sobject('Metadata_Component__c').create(metadataComponentRecord);
+                    console.log('Metadata_Component__c record created:', metadataComponentResult);
                 }
             }
-
 
             return result;
         } catch (error) {
