@@ -18,10 +18,10 @@ export interface flags {
     limits?: boolean;
     codeanalysis?: boolean;
     tests?: boolean;
-    targetusername: string;
+    targetusername?: string;
 }
 
-export async function buildBaseSummary(orgAlias: string, info?: OrgInfo): Promise<OrgSummary> {
+export async function buildBaseSummary(orgAlias?: string, info?: OrgInfo): Promise<OrgSummary> {
     const currentDate = new Date().toISOString();
     const timestamp = Date.now().toString();
     if (!info) {
@@ -40,9 +40,8 @@ export async function buildBaseSummary(orgAlias: string, info?: OrgInfo): Promis
 
 export async function summarizeOrg(flags: flags, orgSummary?: OrgSummary): Promise<OrgSummary> {
     
-    const orgAlias = flags.targetusername || '';
-    const info = getOrgInfo(orgAlias);
-    const baseSummary = orgSummary || (await buildBaseSummary(orgAlias, info));
+    const info = getOrgInfo(flags.targetusername);
+    const baseSummary = orgSummary || (await buildBaseSummary(flags.targetusername, info));
     let selectedDataPoints;
     if(flags.metadata === ""){
         selectedDataPoints = undefined;
@@ -62,7 +61,7 @@ export async function summarizeOrg(flags: flags, orgSummary?: OrgSummary): Promi
 
     if (flags.healthcheck) {
         try {
-            baseSummary.HealthCheck = getHealthCheckScore(orgSummaryDirectory, orgAlias);
+            baseSummary.HealthCheck = getHealthCheckScore(orgSummaryDirectory, flags.targetusername);
         } catch (error) {
             errors.push({ getHealthCheckScoreError: error.message });
         }
@@ -89,7 +88,7 @@ export async function summarizeOrg(flags: flags, orgSummary?: OrgSummary): Promi
             process.chdir(orgSummaryDirectory);
             execSync('sfdx force:project:create -x -n tempSFDXProject');
             process.chdir('./tempSFDXProject');
-            const retrieveCommand = orgAlias ? `sf project retrieve start --metadata ApexClass ApexTrigger AuraDefinitionBundle LightningComponentBundle StaticResource --target-org ${orgAlias}` :
+            const retrieveCommand = flags.targetusername ? `sf project retrieve start --metadata ApexClass ApexTrigger AuraDefinitionBundle LightningComponentBundle StaticResource --target-org ${flags.targetusername}` :
                 'sf project retrieve start --metadata ApexClass ApexTrigger AuraDefinitionBundle LightningComponentBundle StaticResource';
             execSync(retrieveCommand, { encoding: 'utf8' });
             execSync('sfdx scanner:run --target . --format csv --normalize-severity > CLIScannerResults.csv');
@@ -104,16 +103,16 @@ export async function summarizeOrg(flags: flags, orgSummary?: OrgSummary): Promi
 
     if (flags.tests) {
         try {
-            const testResultsCommand = `sfdx force:apex:test:run --target-org "${orgAlias}" --test-level RunLocalTests --code-coverage --result-format json > ${orgSummaryDirectory}/testResults.json`;
+            const testResultsCommand = `sfdx force:apex:test:run --target-org "${flags.targetusername}" --test-level RunLocalTests --code-coverage --result-format json > ${orgSummaryDirectory}/testResults.json`;
             execSync(testResultsCommand, { encoding: 'utf8' });
             const testRunId = extractTestRunId(`${orgSummaryDirectory}/testResults.json`);
             if (testRunId) {
-                console.log(`Checking Status of Apex Test Job "${testRunId}"...`);
-                await pollTestRunResult(testRunId, orgSummaryDirectory, orgAlias);
-                const testResult = await getTestRunDetails(testRunId, orgSummaryDirectory, orgAlias);
-                const orgWideApexCoverage = await getOrgWideApexCoverage(orgSummaryDirectory, orgAlias);
-                const orgWideFlowCoverage = await getFlowCoveragePercentage(orgAlias);
-                const flowCoverageDetails = await getFlowCoverageDetails(orgAlias) as FlowCoverage[];
+                console.log(`Awaiting Apex Test Job "${testRunId}"...`);
+                await pollTestRunResult(testRunId, orgSummaryDirectory, flags.targetusername);
+                const testResult = await getTestRunDetails(testRunId, orgSummaryDirectory, flags.targetusername);
+                const orgWideApexCoverage = await getOrgWideApexCoverage(orgSummaryDirectory, flags.targetusername);
+                const orgWideFlowCoverage = await getFlowCoveragePercentage(flags.targetusername);
+                const flowCoverageDetails = await getFlowCoverageDetails(flags.targetusername) as FlowCoverage[];
                 baseSummary.Tests = {
                     ApexUnitTests: testResult?.methodsCompleted ?? 0,
                     TestDuration: testResult?.runtime ?? 0,
@@ -122,7 +121,7 @@ export async function summarizeOrg(flags: flags, orgSummary?: OrgSummary): Promi
                     TestOutcome: testResult?.outcome ?? 'N/A',
                     ApexCoverageDetails: {
                         'Total': orgWideApexCoverage ?? 0,
-                        'Details': await getApexClassCoverageDetails(orgSummaryDirectory, orgAlias),
+                        'Details': await getApexClassCoverageDetails(orgSummaryDirectory, flags.targetusername),
                     },
                     FlowCoverageDetails: {
                         'Total': orgWideFlowCoverage ?? 0,
@@ -138,7 +137,7 @@ export async function summarizeOrg(flags: flags, orgSummary?: OrgSummary): Promi
     if (selectedDataPoints && selectedDataPoints.length > 0) {
         console.log(`Processing components: ${selectedDataPoints.join(', ')}`);
         try {
-            const queryResults = queryDataPoints(selectedDataPoints, orgSummaryDirectory, orgAlias);
+            const queryResults = queryDataPoints(selectedDataPoints, orgSummaryDirectory, flags.targetusername);
             baseSummary.Metadata = calculateComponentSummary(selectedDataPoints, queryResults, errors);
         } catch (error) {
             errors.push({ componentSummaryError: error.message });
@@ -150,13 +149,10 @@ export async function summarizeOrg(flags: flags, orgSummary?: OrgSummary): Promi
         ...baseSummary
     };
     finish(orgSummaryDirectory, summary, flags.keepdata, flags.outputdirectory);
-    if(flags.outputdirectory){
-        summary.OutputPath = flags.outputdirectory;
-    }
     return summary;
 }
 
-export async function uploadSummary(orgAlias: string, orgSummary: OrgSummary | string): Promise<any> {
+export async function uploadSummary(orgSummary: OrgSummary | string, orgAlias?: string): Promise<UploadSummaryResult> {
     const conn = new jsforce.Connection();
         try {
             const info = getOrgInfo(orgAlias);
@@ -181,7 +177,7 @@ export async function uploadSummary(orgAlias: string, orgSummary: OrgSummary | s
                 Username__c: orgSummary.Username,
                 DateOfSummary__c: formattedDateOfSummary,
             };
-            const result = await conn.sobject('OrgSummary__c').create(orgSummaryRecord);
+            const result:UploadSummaryResult = await conn.sobject('OrgSummary__c').create(orgSummaryRecord) as UploadSummaryResult;
             console.log('OrgSummary__c record created:', result);
             
             if(orgSummary.HealthCheck){
@@ -443,7 +439,6 @@ function getHealthCheckScore(path: string, orgAlias?: string): HealthCheckSummar
             'Risks': hcRisksFiltered.length,
             'Details': hcRisks
         }
-        console.log('Health Check Score and Health Risks added sucessfully.');
         return healthCheckSummary;
 
 }
@@ -807,10 +802,15 @@ export type OrgSummary = {
     OrgInstanceURL: string;
     Username: string;
   } & Partial<{
-    OutputPath: string;
     Metadata: { [key: string]: ComponentSummary };
     Code: CodeAnalysis;
     HealthCheck: HealthCheckSummary;
     Limits: LimitSummary;
     Tests: TestSummary;
   }>;
+
+  export type UploadSummaryResult = {
+    id: string;
+    success: boolean;
+    errors?: string[];
+}
